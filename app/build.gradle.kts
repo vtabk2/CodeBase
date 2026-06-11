@@ -146,4 +146,11 @@ dependencies {
 
     // For Kotlin users also add the Kotlin extensions library for Play In-App Update:
     implementation(libs.app.update.ktx)
+
+    //Adjust
+//    implementation(libs.adjust.android)
+//    implementation(libs.installreferrer)
+    // Add the following if you are using the Adjust SDK inside web views on your app
+//    implementation(libs.sdk.adjust.android.webbridge)
+//    implementation(libs.play.services.ads.identifier)
 }

@@ -10,6 +10,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.android.billingclient.api.*
+import com.core.analytics.AdjustAnalytics
 import com.core.billing.model.BillingModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,7 @@ private const val PRODUCT_DETAILS_RE_QUERY_TIME = 1000L * 60L * 60L * 4L // 4 ho
 class BillingDataSource @Inject constructor(
     private val application: Application,
     private val productIdProvider: ProductIdProvider,
+    private val adjustAnalytics: AdjustAnalytics,
 ) : BillingManager, ProductIdManager, DefaultLifecycleObserver, PurchasesUpdatedListener,
     BillingClientStateListener {
 
@@ -697,6 +699,7 @@ class BillingDataSource @Inject constructor(
                                         productId,
                                         ProductState.PRODUCT_STATE_PURCHASED_AND_ACKNOWLEDGED
                                     )
+                                    trackAdjustPurchase(productId, purchase)
                                 }
                             }
                             _newPurchaseFlow.tryEmit(purchase.products)
@@ -748,6 +751,7 @@ class BillingDataSource @Inject constructor(
             }
             // Since we've consumed the purchase
             for (product in purchase.products) {
+                trackAdjustPurchase(product, purchase)
                 setProductState(product, ProductState.PRODUCT_STATE_UN_PURCHASED)
             }
         } else {
@@ -757,6 +761,54 @@ class BillingDataSource @Inject constructor(
             )
         }
     }
+
+    private fun trackAdjustPurchase(productId: String, purchase: Purchase) {
+        val purchasePrice = getPurchasePrice(productId)
+        if (purchasePrice == null) {
+            Log.e(TAG, "trackAdjustPurchase: ProductDetails not found for $productId")
+            return
+        }
+
+        adjustAnalytics.trackPurchase(
+            productId = productId,
+            purchaseToken = purchase.purchaseToken,
+            orderId = purchase.orderId,
+            signature = purchase.signature,
+            purchaseTime = purchase.purchaseTime,
+            productType = purchasePrice.productType,
+            priceAmountMicros = purchasePrice.priceAmountMicros,
+            priceCurrencyCode = purchasePrice.priceCurrencyCode
+        )
+    }
+
+    private fun getPurchasePrice(productId: String): PurchasePrice? {
+        val productDetails = productDetailsMap[productId]?.value ?: return null
+        productDetails.oneTimePurchaseOfferDetails?.let { offerDetails ->
+            return PurchasePrice(
+                productType = productDetails.productType,
+                priceAmountMicros = offerDetails.priceAmountMicros,
+                priceCurrencyCode = offerDetails.priceCurrencyCode
+            )
+        }
+
+        return productDetails.subscriptionOfferDetails
+            ?.asSequence()
+            ?.flatMap { offerDetails -> offerDetails.pricingPhases.pricingPhaseList.asSequence() }
+            ?.firstOrNull { pricingPhase -> pricingPhase.priceAmountMicros > 0L }
+            ?.let { pricingPhase ->
+                PurchasePrice(
+                    productType = productDetails.productType,
+                    priceAmountMicros = pricingPhase.priceAmountMicros,
+                    priceCurrencyCode = pricingPhase.priceCurrencyCode
+                )
+            }
+    }
+
+    private data class PurchasePrice(
+        val productType: String,
+        val priceAmountMicros: Long,
+        val priceCurrencyCode: String
+    )
 
     /**
      * Launch the billing flow. This will launch an external Activity for a result, so it requires

@@ -151,9 +151,8 @@
             [
             {
             "place_name": "anchored_change_language_bottom",
-            "ad_id": "ca-app-pub-3940256099942544/2014213617",
-            "ad_type": "banner",
-            "banner_size": "anchored",
+            "ad_id": "ca-app-pub-3940256099942544/2247696110",
+            "ad_type": "native",
             "is_collapsible": true,
             "native_template_size": "small_cta_bottom",
             "is_enable": true,

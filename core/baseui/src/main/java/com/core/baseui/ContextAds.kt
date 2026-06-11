@@ -36,7 +36,8 @@ abstract class ContextAds(
     initRewardAdPlaceName: List<IAdPlaceName>,
     initBannerNativeAdPlaceName: List<IAdPlaceName>,
     initPreloadBannerNativeAdPlaceName: List<IAdPlaceName>,
-    var identifier: String = UUID.randomUUID().toString()
+    var identifier: String = UUID.randomUUID().toString(),
+    var isWaitingLoad: Boolean = false
 ) {
     val activityRef = WeakReference<Activity>(activity)
     private var _retryLoadReward = 0
@@ -84,6 +85,35 @@ abstract class ContextAds(
         adInterstitialAll.addAll(initInterstitialAdPlaceName)
         adRewardAll.addAll(initRewardAdPlaceName)
         handleObservableAds()
+    }
+
+    fun ready() {
+        isWaitingLoad = false
+    }
+
+    fun reinitAdPlaceName(
+        initPreloadBannerNativeAdPlaceName: List<IAdPlaceName>? = null,
+        initBannerNativeAdPlaceName: List<IAdPlaceName>? = null,
+        initInterstitialAdPlaceName: List<IAdPlaceName>? = null,
+        initRewardAdPlaceName: List<IAdPlaceName>? = null
+    ) {
+        initPreloadBannerNativeAdPlaceName?.let {
+            adBannerOrNativePreload.clear()
+            adBannerOrNativePreload.addAll(initPreloadBannerNativeAdPlaceName)
+        }
+        initBannerNativeAdPlaceName?.let {
+            adBannerOrNativeAll.clear()
+            adBannerOrNativeAll.addAll(initBannerNativeAdPlaceName)
+        }
+
+        initInterstitialAdPlaceName?.let {
+            adInterstitialAll.clear()
+            adInterstitialAll.addAll(initInterstitialAdPlaceName)
+        }
+        initRewardAdPlaceName?.let {
+            adRewardAll.clear()
+            adRewardAll.addAll(initRewardAdPlaceName)
+        }
     }
 
     fun onDestroy() {
@@ -179,7 +209,7 @@ abstract class ContextAds(
             if (!oneTimeLoad) {
                 adRewardAll.add(adPlaceName)
             }
-            adInterstitialLazyLoad.add(adPlaceName)
+            adRewardLazyLoad.add(adPlaceName)
         }
     }
 
@@ -192,6 +222,7 @@ abstract class ContextAds(
     }
 
     private fun preloadFullAds() {
+        if(isWaitingLoad) return
         activityRef.get()?.let { activity ->
 
             adInterstitialAll.forEach {
@@ -206,6 +237,7 @@ abstract class ContextAds(
     }
 
     private fun preloadBannerNative() {
+        if(isWaitingLoad) return
         activityRef.get()?.let { activity ->
             adBannerOrNativeAll.forEach {
                 adsManager.loadBannerNativeAd(activity, it, identifier, false, isReload = false)

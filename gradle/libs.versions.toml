@@ -58,7 +58,17 @@ junit = "4.13.2"
 androidxJunit = "1.3.0"
 espressoCore = "3.7.0"
 
+#adjust required
+installreferrer = "2.2"
+adjustAndroid = "5.7.0"
+adjustAndroidWebbridge = "5.7.0"
+
 [libraries]
+#Adjust
+adjust-android = { module = "com.adjust.sdk:adjust-android", version.ref = "adjustAndroid" }
+installreferrer = { module = "com.android.installreferrer:installreferrer", version.ref = "installreferrer" }
+sdk-adjust-android-webbridge = { module = "com.adjust.sdk:adjust-android-webbridge", version.ref = "adjustAndroidWebbridge" }
+
 ######################################################################
 # CORE & ANDROID JETPACK
 ######################################################################

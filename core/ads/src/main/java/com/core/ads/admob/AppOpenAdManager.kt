@@ -10,6 +10,7 @@ import androidx.lifecycle.LifecycleObserver
 import androidx.lifecycle.OnLifecycleEvent
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.android.gms.ads.AdError
+import com.google.android.gms.ads.AdapterResponseInfo
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.appopen.AppOpenAd
@@ -18,6 +19,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import com.core.ads.domain.AdOpenAdUiResource
 import com.core.ads.domain.AdsManager
 import com.core.ads.model.PreventShowManyInterstitialAds
+import com.core.analytics.AdjustAnalytics
 import com.core.config.domain.RemoteConfigRepository
 import com.core.config.domain.data.IAdPlaceName
 import com.core.config.domain.data.CoreAdPlaceName
@@ -44,7 +46,8 @@ class AppOpenAdManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val remoteConfigRepository: RemoteConfigRepository,
     private val adManager: AdsManager,
-    private val reOpenShowCondition: ReOpenShowCondition
+    private val reOpenShowCondition: ReOpenShowCondition,
+    private val adjustAnalytics: AdjustAnalytics
 ) : LifecycleObserver, Application.ActivityLifecycleCallbacks {
 
     companion object {
@@ -124,6 +127,14 @@ class AppOpenAdManager @Inject constructor(
                 Log.i(TAG, "AppOpenAd loaded $adPlaceName")
                 adHolder.isLoading = false
                 adHolder.appOpenAd = ad
+                ad.setOnPaidEventListener { adValue ->
+                    trackAdjustAdRevenue(
+                        adUnitId = adHolder.adPlace.adId,
+                        loadedAdapterResponseInfo = ad.responseInfo?.loadedAdapterResponseInfo,
+                        adValueMicros = adValue.valueMicros,
+                        adValueCurrencyCode = adValue.currencyCode
+                    )
+                }
                 ad.setImmersiveMode(true)
                 adHolder.loadTime = Date().time
                 notifyAdOpenAppLoaded(adPlaceName)
@@ -277,5 +288,17 @@ class AppOpenAdManager @Inject constructor(
 
     override fun onActivityDestroyed(activity: Activity) {}
 
-
+    private fun trackAdjustAdRevenue(
+        adUnitId: String,
+        loadedAdapterResponseInfo: AdapterResponseInfo?,
+        adValueMicros: Long,
+        adValueCurrencyCode: String
+    ) {
+        adjustAnalytics.trackRevenueNetwork(
+            adUnitId = adUnitId,
+            adSourceName = loadedAdapterResponseInfo?.adSourceName,
+            adValueMicros = adValueMicros,
+            adValueCurrencyCode = adValueCurrencyCode
+        )
+    }
 }

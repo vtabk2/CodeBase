@@ -37,6 +37,7 @@ android {
 dependencies {
 
     implementation (project(":core:preference"))
+    implementation(project(":core:analytics"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)

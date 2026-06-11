@@ -49,7 +49,8 @@ abstract class BaseSplashActivity<VB : ViewBinding> : CoreActivity<VB>() {
     @Inject
     lateinit var getDataFromRemoteUseCase: GetDataFromRemoteUseCaseImpl
     private val viewModel by viewModels<SplashViewModel>()
-
+    override val isWaitingAds: Boolean
+        get() = true
     private var timeShowIntro by SharedPrefs.instance.preference(defaultValue = 0L, key = "timeShowIntro")
 
     private var countDownTimer: JsgCountDownTimer? = null
@@ -360,6 +361,13 @@ abstract class BaseSplashActivity<VB : ViewBinding> : CoreActivity<VB>() {
         }
 
         viewModel.isSplashAdsFlowStarted = true
+        reinitAdPlaceName(
+            initInterstitialAdPlaceName = providerInterAdPlaceName(),
+            initBannerNativeAdPlaceName = providerBannerNativeAdPlaceName(),
+            initRewardAdPlaceName = providerRewardAdPlaceName(),
+            initPreloadBannerNativeAdPlaceName = providerPreloadBannerNativeAdPlaceName()
+        )
+        readyAds()
         preloadAds()
 
         val isShowAd = when {

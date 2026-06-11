@@ -70,7 +70,9 @@ abstract class BaseActivity<T : ViewBinding> : AppCompatActivity(), CoroutineSco
     private lateinit var startActivityIntent: ActivityResultLauncher<Intent>
     private var onResult: ((ActivityResult) -> Unit)? = null
     private var isVip = false
-    open protected val isRegisterOnKeyboardListener = false
+    protected open val isRegisterOnKeyboardListener = false
+
+    open val isWaitingAds = false
 
     private var keyboardHeightProvider: KeyboardProvider? = null
     private var onChangeKeyBoardHeight = ArrayList<(Int) -> Unit>()
@@ -102,7 +104,7 @@ abstract class BaseActivity<T : ViewBinding> : AppCompatActivity(), CoroutineSco
                 hideNavigationBar()
             }
 
-            if(isHideStatusBar) {
+            if (isHideStatusBar) {
                 window?.let {
                     hideSystemBars(it)
                 }
@@ -301,6 +303,7 @@ abstract class BaseActivity<T : ViewBinding> : AppCompatActivity(), CoroutineSco
             initInterstitialAdPlaceName = providerInterAdPlaceName(),
             initBannerNativeAdPlaceName = providerBannerNativeAdPlaceName(),
             initPreloadBannerNativeAdPlaceName = providerPreloadBannerNativeAdPlaceName(),
+            isWaitingLoad = isWaitingAds
         ) {
 
             override fun onBannerNativeResult(adResource: AdLoadBannerNativeUiResource) {
@@ -524,7 +527,11 @@ abstract class BaseActivity<T : ViewBinding> : AppCompatActivity(), CoroutineSco
      * @param adPlaceName Tên vị trí quảng cáo.
      * @param oneTimeLoad Chỉ tải quảng cáo một lần nếu true.
      */
-    fun loadBannerOrNativeAds(adPlaceName: IAdPlaceName, oneTimeLoad: Boolean, isReload: Boolean = false) {
+    fun loadBannerOrNativeAds(
+        adPlaceName: IAdPlaceName,
+        oneTimeLoad: Boolean,
+        isReload: Boolean = false
+    ) {
         contextAds?.loadBannerOrNativeAds(adPlaceName, oneTimeLoad, isReload = isReload)
     }
 
@@ -563,17 +570,19 @@ abstract class BaseActivity<T : ViewBinding> : AppCompatActivity(), CoroutineSco
         callbackRetry: (() -> Unit)? = null,
         callbackNoAds: (() -> Unit)? = null
     ) {
-        showRewardAd(adPlaceName = adPlaceName, onHandleCompleted = { isShown, isEarnedReward, isNoAds ->
-            if (isEarnedReward) {
-                callbackSuccess.invoke()
-            } else if (isShown) {
-                callbackClose?.invoke()
-            } else if (isNoAds) {
-                callbackNoAds?.invoke()
-            } else {
-                callbackRetry?.invoke()
-            }
-        })
+        showRewardAd(
+            adPlaceName = adPlaceName,
+            onHandleCompleted = { isShown, isEarnedReward, isNoAds ->
+                if (isEarnedReward) {
+                    callbackSuccess.invoke()
+                } else if (isShown) {
+                    callbackClose?.invoke()
+                } else if (isNoAds) {
+                    callbackNoAds?.invoke()
+                } else {
+                    callbackRetry?.invoke()
+                }
+            })
     }
 
     /**
@@ -583,7 +592,8 @@ abstract class BaseActivity<T : ViewBinding> : AppCompatActivity(), CoroutineSco
      * @param onHandleCompleted Callback được gọi khi quảng cáo được hiển thị hoặc không và người dùng có nhận được phần thưởng hay không.
      */
     private fun showRewardAd(
-        adPlaceName: IAdPlaceName, onHandleCompleted: ((isShown: Boolean, isEarnedReward: Boolean, isNoAds: Boolean) -> Unit)
+        adPlaceName: IAdPlaceName,
+        onHandleCompleted: ((isShown: Boolean, isEarnedReward: Boolean, isNoAds: Boolean) -> Unit)
     ) {
         contextAds?.showRewardAd(adPlaceName, onHandleCompleted)
     }
@@ -633,6 +643,24 @@ abstract class BaseActivity<T : ViewBinding> : AppCompatActivity(), CoroutineSco
      * @param adResource Tài nguyên quảng cáo banner/native đã tải.
      */
     open fun onBannerNativeResult(adResource: AdLoadBannerNativeUiResource) {}
+
+    fun reinitAdPlaceName(
+        initPreloadBannerNativeAdPlaceName: List<IAdPlaceName>? = null,
+        initBannerNativeAdPlaceName: List<IAdPlaceName>? = null,
+        initInterstitialAdPlaceName: List<IAdPlaceName>? = null,
+        initRewardAdPlaceName: List<IAdPlaceName>? = null
+    ) {
+        contextAds?.reinitAdPlaceName(
+            initPreloadBannerNativeAdPlaceName = initPreloadBannerNativeAdPlaceName,
+            initBannerNativeAdPlaceName = initBannerNativeAdPlaceName,
+            initRewardAdPlaceName = initRewardAdPlaceName,
+            initInterstitialAdPlaceName = initInterstitialAdPlaceName
+        )
+    }
+
+    fun readyAds() {
+        contextAds?.ready()
+    }
 
     fun preloadAds() {
         contextAds?.preloadAds()

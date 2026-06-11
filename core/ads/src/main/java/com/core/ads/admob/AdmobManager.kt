@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.graphics.toColorInt
 import androidx.fragment.app.FragmentManager
+import com.core.ads.AdsSdkInitializer
 import com.core.ads.domain.AdFullScreenUiResource
 import com.core.ads.domain.AdLoadBannerNativeUiResource
 import com.core.ads.domain.AdsManager
@@ -21,6 +22,7 @@ import com.core.ads.model.NativeAdHolder
 import com.core.ads.model.PreventShowManyInterstitialAds
 import com.core.ads.model.RewardedAdHolder
 import com.core.ads.model.RewardedInterstitialAdHolder
+import com.core.analytics.AdjustAnalytics
 import com.core.analytics.AnalyticsManager
 import com.core.config.domain.RemoteConfigRepository
 import com.core.config.domain.data.AdPlace
@@ -50,6 +52,7 @@ import com.google.android.gms.ads.AdLoader
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.AdapterResponseInfo
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
@@ -93,7 +96,9 @@ class AdmobManager @Inject constructor(
     private val remoteConfigRepository: RemoteConfigRepository,
     private val purchasePreferences: PurchasePreferences,
     private val analyticsManager: AnalyticsManager,
-    private val appPref: AppPreferences
+    private val appPref: AppPreferences,
+    private val adsSdkInitializer: AdsSdkInitializer,
+    private val adjustAnalytics: AdjustAnalytics
 ) : AdsManager {
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -293,6 +298,7 @@ class AdmobManager @Inject constructor(
                             _requestConsentFlow.emit(ConsentFormUiResource.Showing)
                         }
                         consentForm.show(activity) {
+                            syncStoredGdprConsent()
                             applicationScope.launch {
                                 _requestConsentFlow.emit(ConsentFormUiResource.Complete)
                             }
@@ -306,16 +312,19 @@ class AdmobManager @Inject constructor(
                             _requestConsentFlow.emit(ConsentFormUiResource.Showing)
                         }
                         consentForm.show(activity) {
+                            syncStoredGdprConsent()
                             onEuConsentComplete()
                         }
                     }
 
                     else -> {
+                        syncStoredGdprConsent()
                         onEuConsentComplete()
                     }
                 }
             },
             /* failureListener = */ {
+                syncStoredGdprConsent()
                 onEuConsentComplete()
             }
         )
@@ -913,6 +922,14 @@ class AdmobManager @Inject constructor(
                 Log.i(TAG, "Interstitial loaded $placeName")
                 adHolder.isLoading = false
                 adHolder.interstitialAd = p0
+                p0.setOnPaidEventListener { adValue ->
+                    trackAdjustAdRevenue(
+                        adUnitId = adHolder.adPlace.adId,
+                        loadedAdapterResponseInfo = p0.responseInfo?.loadedAdapterResponseInfo,
+                        adValueMicros = adValue.valueMicros,
+                        adValueCurrencyCode = adValue.currencyCode
+                    )
+                }
                 p0.setImmersiveMode(true)
                 notifyAdFullScreenLoaded(placeName)
                 if (adHolder.isWaitLoadToShow) {
@@ -1022,6 +1039,14 @@ class AdmobManager @Inject constructor(
                 Log.i(TAG, "RewardedInterstitial loaded $placeName")
                 adHolder.isLoading = false
                 adHolder.rewardedInterstitialAd = p0
+                p0.setOnPaidEventListener { adValue ->
+                    trackAdjustAdRevenue(
+                        adUnitId = adHolder.adPlace.adId,
+                        loadedAdapterResponseInfo = p0.responseInfo?.loadedAdapterResponseInfo,
+                        adValueMicros = adValue.valueMicros,
+                        adValueCurrencyCode = adValue.currencyCode
+                    )
+                }
                 p0.setImmersiveMode(true)
                 notifyAdFullScreenLoaded(placeName)
                 if (adHolder.isWaitLoadToShow) {
@@ -1124,6 +1149,14 @@ class AdmobManager @Inject constructor(
                 Log.i(TAG, "Rewarded loaded $placeName")
                 adHolder.isLoading = false
                 adHolder.rewardedAd = p0
+                p0.setOnPaidEventListener { adValue ->
+                    trackAdjustAdRevenue(
+                        adUnitId = adHolder.adPlace.adId,
+                        loadedAdapterResponseInfo = p0.responseInfo?.loadedAdapterResponseInfo,
+                        adValueMicros = adValue.valueMicros,
+                        adValueCurrencyCode = adValue.currencyCode
+                    )
+                }
                 p0.setImmersiveMode(true)
                 notifyAdFullScreenLoaded(placeName)
                 if (adHolder.isWaitLoadToShow) {
@@ -1198,6 +1231,14 @@ class AdmobManager @Inject constructor(
                         Log.i(TAG, "Native loaded $placeName")
                         adHolder.nativeAd = ad
                         adHolder.loadedAtMs = SystemClock.elapsedRealtime()
+                        ad.setOnPaidEventListener { adValue ->
+                            trackAdjustAdRevenue(
+                                adUnitId = adHolder.adPlace.adId,
+                                loadedAdapterResponseInfo = ad.responseInfo?.loadedAdapterResponseInfo,
+                                adValueMicros = adValue.valueMicros,
+                                adValueCurrencyCode = adValue.currencyCode
+                            )
+                        }
 
                         if (isNotAbleToVisibleAdsToUser(placeName)) {
                             notifyBannerNativeFailedToLoad(placeName)
@@ -1373,6 +1414,14 @@ class AdmobManager @Inject constructor(
         bannerAd = AdView(activity).apply {
             adUnitId = adHolder.adPlace.adId
             setAdSize(adSize)
+            setOnPaidEventListener { adValue ->
+                trackAdjustAdRevenue(
+                    adUnitId = adHolder.adPlace.adId,
+                    loadedAdapterResponseInfo = responseInfo?.loadedAdapterResponseInfo,
+                    adValueMicros = adValue.valueMicros,
+                    adValueCurrencyCode = adValue.currencyCode
+                )
+            }
             adListener = object : AdListener() {
                 override fun onAdFailedToLoad(p0: LoadAdError) {
                     super.onAdFailedToLoad(p0)
@@ -1461,6 +1510,20 @@ class AdmobManager @Inject constructor(
         bannerAd.loadAd(getAdRequest(bannerAdPlace.isCollapsible))
     }
 
+    private fun trackAdjustAdRevenue(
+        adUnitId: String,
+        loadedAdapterResponseInfo: AdapterResponseInfo?,
+        adValueMicros: Long,
+        adValueCurrencyCode: String
+    ) {
+        adjustAnalytics.trackRevenueNetwork(
+            adUnitId = adUnitId,
+            adSourceName = loadedAdapterResponseInfo?.adSourceName,
+            adValueMicros = adValueMicros,
+            adValueCurrencyCode = adValueCurrencyCode
+        )
+    }
+
     private fun sendAdEvent(adPlaceName: IAdPlaceName, action: String) {
         runCatching {
             val suffix = "_$action"
@@ -1516,6 +1579,7 @@ class AdmobManager @Inject constructor(
                 val status = statusMap[adapterClass]
                 Log.d(TAG, "Adapter name: $adapterClass, Description: ${status!!.description}, Latency: ${status.initializationState}")
             }
+            adsSdkInitializer.onAdInitCompleted()
             notifyConsentCompleteOnce()
         }
         /* MobileAds.openAdInspector(context) {
@@ -1549,6 +1613,17 @@ class AdmobManager @Inject constructor(
 //            setDoNotTrackStatus(false)
 //        }
 
+    }
+
+    private fun syncStoredGdprConsent() {
+        val consentGranted = when (consentInformation.consentStatus) {
+            ConsentInformation.ConsentStatus.NOT_REQUIRED,
+            ConsentInformation.ConsentStatus.OBTAINED -> true
+            ConsentInformation.ConsentStatus.REQUIRED,
+            ConsentInformation.ConsentStatus.UNKNOWN -> false
+            else -> false
+        }
+        adsSdkInitializer.onUpdateGdprConsent(consentGranted)
     }
 
     private fun isPreventShowAdsDueManyAdsClicked() =
