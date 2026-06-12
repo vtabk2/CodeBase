@@ -690,7 +690,7 @@ abstract class BaseActivity<T : ViewBinding> : AppCompatActivity(), CoroutineSco
      * @param adPlaceName Tên vị trí quảng cáo.
      * @param onHandleCompleted Callback được gọi khi quảng cáo được hiển thị hoặc không và người dùng có nhận được phần thưởng hay không.
      */
-    private fun showRewardAd(
+    fun showRewardAd(
         adPlaceName: IAdPlaceName,
         onHandleCompleted: ((isShown: Boolean, isEarnedReward: Boolean, isNoAds: Boolean) -> Unit)
     ) {

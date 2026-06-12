@@ -18,7 +18,7 @@ class RadioGroupManager @Inject constructor() {
                 view.isSelected = isContains
             }
             if(isContains && passChange && radio.viewParent != null) {
-                mOnChange?.invoke(radio.viewParent!!, radio.mTag)
+                mOnChange?.invoke(radio.viewParent!!, radio.tag)
             }
             radio.viewParent?.isSelected = isContains
         }
@@ -28,12 +28,12 @@ class RadioGroupManager @Inject constructor() {
 
     fun selectedRadioByTag(tag: Any, passChange: Boolean = false) {
         radios.forEach { radio ->
-            val isContains = radio.mTag == tag || radio.viewParent?.tag == tag
+            val isContains = radio.tag == tag || radio.viewParent?.tag == tag
             radio.views.forEach { view ->
                 view.isSelected = isContains
             }
             if(isContains && passChange && radio.viewParent != null) {
-                mOnChange?.invoke(radio.viewParent!!, radio.mTag)
+                mOnChange?.invoke(radio.viewParent!!, radio.tag)
             }
             radio.viewParent?.isSelected = isContains
         }
@@ -53,7 +53,7 @@ class RadioGroupManager @Inject constructor() {
                 Timber.e("View Parent is null")
             } else {
                 radio.viewParent?.setOnSingleClick(timeDelay = delayClick) {
-                    mOnChange?.invoke(it, radio.mTag)
+                    mOnChange?.invoke(it, radio.tag)
                     selectedRadios(radio.viewParent!!)
                 }
             }
@@ -64,10 +64,11 @@ class RadioGroupManager @Inject constructor() {
     class Radio {
         var views: ArrayList<View> = arrayListOf()
         var viewParent: View ?= null
-        var mTag: Any ?=null
+        var tag: Any ?=null
 
         fun addView(view: View) = apply { views.apply { add(view) } }
-        fun setTag(tag: Any) = apply { mTag = tag }
+        fun addViews(view: List<View>) = apply { views.apply { addAll(view) } }
+        fun setTag(tag: Any) = apply { this.tag = tag }
         fun addViewParent(view: View) = apply {
             viewParent = view
         }

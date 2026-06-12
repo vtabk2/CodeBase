@@ -29,7 +29,8 @@ abstract class BaseSingleSelectListAdapter<T : BaseItemUI, V : BaseViewHolder<T>
 
     fun singleSelected(
         identify: String,
-        onSingleSelected: ((position: Int, data: T) -> Unit)? = null
+        onSingleSelected: ((position: Int, data: T) -> Unit)? = null,
+        ignoreCallBack: Boolean = false
     ) {
         if (_identifySelect != identify) {
             val index = currentList.indexOfFirst { it.identify == _identifySelect }
@@ -43,8 +44,10 @@ abstract class BaseSingleSelectListAdapter<T : BaseItemUI, V : BaseViewHolder<T>
             if (indexSelected != -1) {
                 notifyItemChanged(indexSelected)
             }
+            if (!ignoreCallBack) {
+                this.onSingleSelected?.invoke(indexSelected, getItem(indexSelected))
+            }
             onSingleSelected?.invoke(indexSelected, getItem(indexSelected))
-            this.onSingleSelected?.invoke(indexSelected, getItem(indexSelected))
         }
     }
 
