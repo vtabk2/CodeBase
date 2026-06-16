@@ -2,6 +2,7 @@ package com.core.preference
 
 import android.content.Context
 import androidx.lifecycle.MutableLiveData
+import com.core.utilities.isDebug
 import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -45,7 +46,7 @@ class PurchasePreferences @Inject constructor(@ApplicationContext private val ap
      * Kiểm tra xem người dùng đã mua vip chưa
      */
     fun isUserVip(): Boolean {
-        if (isVipDebug) return true
+        if (isVipDebug && applicationContext.isDebug()) return true
         return currentKeyVipList.any { keyVip ->
             prefs.get(keyVip, false)
         }
