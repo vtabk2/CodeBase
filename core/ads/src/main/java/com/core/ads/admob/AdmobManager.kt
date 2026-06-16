@@ -1870,6 +1870,7 @@ class AdmobManager @Inject constructor(
     }
 
     fun isDisableByTestAd(adName: String): Boolean {
+        Log.d(TAG, "isDisableByTestAd: isTurnOnAdPlacesDisabledWhenDetectTestAd $isTurnOnAdPlacesDisabledWhenDetectTestAd isTestAd $isTestAd adPlacesDisabledWhenDetectTestAd $adPlacesDisabledWhenDetectTestAd ")
         return isTurnOnAdPlacesDisabledWhenDetectTestAd && isTestAd && adPlacesDisabledWhenDetectTestAd.contains(
             adName
         )
