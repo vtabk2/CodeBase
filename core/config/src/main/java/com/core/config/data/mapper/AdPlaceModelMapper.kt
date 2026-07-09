@@ -111,7 +111,9 @@ internal class AdPlaceModelMapper @Inject constructor(
                 hideTextCountDown = model.hideTextCountDown,
                 hideProgressCountDown = model.hideProgressCountDown,
                 hideTextSkipCountDown = model.hideTextSkipCountDown,
-                progressBarTint = model.progressBarTint
+                progressBarTint = model.progressBarTint,
+                textColorAdsNotifyView = model.textColorAdsNotifyView,
+                backgroundColorAdsNotifyView = model.backgroundColorAdsNotifyView
             )
             AdType.Banner -> BannerAdPlace(
                 placeName = placeName,
