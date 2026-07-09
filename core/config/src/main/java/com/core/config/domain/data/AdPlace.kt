@@ -94,6 +94,8 @@ data class NativeAdPlace(
     val backgroundColor: String?,
     val countDownTimer: Int?,
     val backgroundFullColor: String?,
+    val backgroundColorAdsNotifyView: String?,
+    val textColorAdsNotifyView: String?,
     val mediaBackgroundColor: String?,
     val backgroundRadius: Int?,
     val primaryTextColor: String?,

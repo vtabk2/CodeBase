@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.LayoutRes
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.toColorInt
 import androidx.core.view.isNotEmpty
 import com.core.ads.R
 import com.core.ads.admob.AdmobManager
@@ -252,7 +253,8 @@ class BannerNativeContainerLayout @JvmOverloads constructor(
             .withTertiaryTextTypefaceColor(nativeAdPlace.bodyTextColor)
             .withBackgroundResource(backgroundRes)
             .withMainBackgroundRadius(nativeAdPlace.backgroundRadius)
-            .withBackgroundAdsNotifyView(backgroundAdsNotifyView)
+            .withBackgroundAdsNotifyView(runCatching { nativeAdPlace.backgroundColorAdsNotifyView?.toColorInt() }.getOrNull() ?: backgroundAdsNotifyView)
+            .withTextColorAdsNotifyView(nativeAdPlace.textColorAdsNotifyView)
             .withMediaBackgroundColor(nativeAdPlace.mediaBackgroundColor)
             .withIsEnableImmersive(nativeAdPlace.isEnableFullScreenImmersive)
             .withHideTextCountDown(nativeAdPlace.hideTextCountDown)

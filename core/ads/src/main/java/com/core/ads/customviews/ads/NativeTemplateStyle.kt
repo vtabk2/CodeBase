@@ -53,6 +53,10 @@ class NativeTemplateStyle {
     var backgroundAdsNotifyView: Int? = null
         private set
 
+    var textColorAdsNotifyView: String? = null
+        private set
+
+
     // All templates have a primary text area which is populated by the native ad's headline.
     // Primary text typeface.
     var primaryTextTypeface: Typeface? = null
@@ -212,6 +216,11 @@ class NativeTemplateStyle {
 
         fun withBackgroundAdsNotifyView(backgroundAdsNotifyView: Int?): Builder {
             styles.backgroundAdsNotifyView = backgroundAdsNotifyView
+            return this
+        }
+
+        fun withTextColorAdsNotifyView(textColorAdsNotifyView: String?): Builder {
+            styles.textColorAdsNotifyView = textColorAdsNotifyView
             return this
         }
 
