@@ -12,6 +12,10 @@ internal data class AdPlaceModel(
     @Json(name = "ad_id")
     val adId: String?,
 
+    // Optional higher-priority ad unit ids. They are tried before adId.
+    @Json(name = "high_floor_ad_ids")
+    val highFloorAdIds: List<String>?,
+
     @Json(name = "ad_type")
     val adType: String?,
 

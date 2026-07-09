@@ -25,7 +25,7 @@
             "is_preload_banner_native_exit":true,
             "is_always_preload_banner_native_ads_when_start": true,
             "is_hide_native_banner_when_network_error": true,
-            "is_always_show_intro_and_language_screen": false,
+            "is_always_show_intro_and_language_screen": true,
             "is_always_show_intro_and_language_screen_with_interval": false,
             "is_enable_introduction_screen": true,
             "is_enable_change_language_screen": false,
@@ -87,7 +87,7 @@
             "max_time_to_wait_app_open_ad": 10,
             "time_skip_app_open_ad_when_not_available": 6,
             "ad_type_first_open": "interstitial",
-            "ad_type": "app_open",
+            "ad_type": "interstitial",
             "is_enable_retry": true,
             "is_load_before_eu_consent": true,
             "min_time_wait_progress_before_show_ad": 3,
@@ -331,19 +331,19 @@
             "place_name": "open_app_first_open",
             "ad_id": "ca-app-pub-3940256099942544/9257395921",
             "ad_type": "app_open",
-            "is_enable": false
+            "is_enable": true
             },
             {
             "place_name": "open_app",
             "ad_id": "ca-app-pub-3940256099942544/9257395921",
             "ad_type": "app_open",
-            "is_enable": false
+            "is_enable": true
             },
             {
             "place_name": "reopen_app",
             "ad_id": "ca-app-pub-3940256099942544/9257395921",
             "ad_type": "app_open",
-            "is_enable": false
+            "is_enable": true
             }
             ]
         </value>
@@ -362,15 +362,18 @@
             "place_name": "action_app_open_first_open",
             "ad_id": "ca-app-pub-3940256099942544/1033173712",
             "ad_type": "interstitial",
-            "is_enable": false,
-            "is_auto_load_after_dismiss": false
+            "high_floor_ad_ids": [
+                "ca-app-pub-3940256099942544/1033173719"
+            ],
+            "is_enable": true,
+            "is_auto_load_after_dismiss": true
             },
             {
             "place_name": "action_app_open",
             "ad_id": "ca-app-pub-3940256099942544/1033173712",
             "ad_type": "interstitial",
-            "is_enable": false,
-            "is_auto_load_after_dismiss": false
+            "is_enable": true,
+            "is_auto_load_after_dismiss": true
             },
             {
             "place_name": "fullscreen_test",
@@ -447,6 +450,9 @@
             "place_name": "action_next_in_introduction",
             "ad_id": "ca-app-pub-3940256099942544/1033173712",
             "is_ignore_interval": true,
+            "high_floor_ad_ids": [
+                "ca-app-pub-3940256099942544/1033173719"
+            ],
             "ad_type": "interstitial",
             "is_auto_load_after_dismiss": false,
             "is_enable": true

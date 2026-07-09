@@ -11,6 +11,9 @@ sealed class AdPlace {
 
     abstract val adId: String
 
+    // Higher-priority ad unit ids used as a waterfall before falling back to adId.
+    abstract val highFloorAdIds: List<String>
+
     abstract val isEnable: Boolean
 
     abstract val adType: AdType
@@ -46,6 +49,7 @@ data class RewardedVideoAdPlace(
     override val isTrackingShow: Boolean,
     override val isTrackingClick: Boolean,
     override val adId: String,
+    override val highFloorAdIds: List<String>,
     override val isEnable: Boolean,
     override val adType: AdType,
     override val isAutoLoadAfterDismiss: Boolean,
@@ -58,6 +62,7 @@ data class RewardedInterstitialAdPlace(
     override val isTrackingClick: Boolean,
     override val placeName: IAdPlaceName,
     override val adId: String,
+    override val highFloorAdIds: List<String>,
     override val isEnable: Boolean,
     override val adType: AdType,
     override val isAutoLoadAfterDismiss: Boolean,
@@ -69,6 +74,7 @@ data class InterstitialAdPlace(
     override val isTrackingClick: Boolean,
     override val placeName: IAdPlaceName,
     override val adId: String,
+    override val highFloorAdIds: List<String>,
     override val isEnable: Boolean,
     override val adType: AdType,
     override val isAutoLoadAfterDismiss: Boolean,
@@ -100,6 +106,7 @@ data class NativeAdPlace(
     val progressBarTint: String?,
     override val placeName: IAdPlaceName,
     override val adId: String,
+    override val highFloorAdIds: List<String>,
     override val isEnable: Boolean,
     override val adType: AdType,
     override val isAutoLoadAfterDismiss: Boolean,
@@ -114,6 +121,7 @@ data class BannerAdPlace(
     val autoReloadCollapsible: Boolean,
     override val placeName: IAdPlaceName,
     override val adId: String,
+    override val highFloorAdIds: List<String>,
     override val isEnable: Boolean,
     override val adType: AdType,
     override val isAutoLoadAfterDismiss: Boolean,
@@ -126,6 +134,7 @@ data class AppOpenAdPlace(
     val limitShow: Int,
     override val placeName: IAdPlaceName,
     override val adId: String,
+    override val highFloorAdIds: List<String>,
     override val isEnable: Boolean,
     override val adType: AdType,
     override val isAutoLoadAfterDismiss: Boolean,
@@ -137,6 +146,7 @@ data class NoneAdPlace(
     override val isTrackingClick: Boolean = false,
     override val placeName: IAdPlaceName = CoreAdPlaceName.NONE,
     override val adId: String = "",
+    override val highFloorAdIds: List<String> = emptyList(),
     override val isEnable: Boolean = false,
     override val adType: AdType = AdType.None,
     override val isAutoLoadAfterDismiss: Boolean = false,

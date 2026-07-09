@@ -91,6 +91,11 @@ import javax.inject.Singleton
 private const val TAG = "AdmobManager"
 private const val CONSENT_AND_MOBILE_ADS_TOTAL_TIMEOUT_MS = 10_000L
 
+// Safety net: if a full-screen load neither succeeds nor fails within this window (e.g. the
+// driving Activity is destroyed mid-load and the SDK never calls back), force-release the
+// stuck ad unit so waiting placements don't stay latched on isLoading = true forever.
+private const val FULL_SCREEN_LOAD_TIMEOUT_MS = 30_000L
+
 @Singleton
 class AdmobManager @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -123,7 +128,10 @@ class AdmobManager @Inject constructor(
     override val requestConsentFlow = _requestConsentFlow.asSharedFlow()
 
     private val adHolderBannerNativeMap = mutableMapOf<IAdPlaceName, AdHolder>()
-    private val adHolderFullScreenMap = mutableMapOf<String, AdHolder>()
+    private val adHolderFullScreenMap = mutableMapOf<IAdPlaceName, AdHolder>()
+    // Shared full-screen ad-unit cache. Placements can share a high-floor ad unit id, so the
+    // SDK load is tracked by ad type + ad unit id while placement state stays separate.
+    private val fullScreenAdUnitHolderMap = mutableMapOf<FullScreenAdUnitKey, FullScreenAdUnitHolder>()
     private val adHolderAppOpenMap = mutableMapOf<IAdPlaceName, AppOpenAdHolder>()
 
     private val consentInformation: ConsentInformation by lazy {
@@ -142,6 +150,31 @@ class AdmobManager @Inject constructor(
     private var isConsentRequesting = false
 
     private var disableAdCountDownTimer: CountDownTimer? = null
+
+    private data class FullScreenAdUnitKey(
+        val adTypeKey: String,
+        val adUnitId: String
+    )
+
+    // Holds one SDK load result and all placements waiting for that specific full-screen ad unit.
+    private data class FullScreenAdUnitHolder(
+        var isLoading: Boolean = false,
+        var loadId: Int = 0,
+        var interstitialAd: InterstitialAd? = null,
+        var rewardedInterstitialAd: RewardedInterstitialAd? = null,
+        var rewardedAd: RewardedAd? = null,
+        val waiterActivities: MutableMap<IAdPlaceName, Activity> = linkedMapOf(),
+        val waitLoadToShowActivities: MutableMap<IAdPlaceName, Activity> = linkedMapOf()
+    ) {
+        fun isLoaded(adType: AdType): Boolean {
+            return when (adType) {
+                AdType.Interstitial -> interstitialAd != null
+                AdType.RewardedInterstitial -> rewardedInterstitialAd != null
+                AdType.RewardedVideo -> rewardedAd != null
+                else -> false
+            }
+        }
+    }
 
     override fun isHasFullscreenAdShowing(): Boolean {
         adHolderFullScreenMap.values.forEach { adHolder ->
@@ -579,7 +612,9 @@ class AdmobManager @Inject constructor(
         activity: Activity,
         adHolder: InterstitialAdHolder
     ) {
-        val interstitialAd = adHolder.interstitialAd
+        val interstitialAd = adHolder.interstitialAd ?: consumeInterstitialAd(adHolder.adPlace)?.also {
+            adHolder.interstitialAd = it
+        }
         if (interstitialAd != null) {
             if (isCanNotShowInterAd(adHolder.adPlace) || isDisableByTestAd(adHolder.adPlace.placeName.name)) {
                 notifyAdFullScreenCompleted(adHolder.adPlace.placeName, false)
@@ -664,6 +699,9 @@ class AdmobManager @Inject constructor(
         adHolder: RewardedInterstitialAdHolder,
     ) {
         val rewardedInterstitialAd = adHolder.rewardedInterstitialAd
+            ?: consumeRewardedInterstitialAd(adHolder.adPlace)?.also {
+                adHolder.rewardedInterstitialAd = it
+            }
         if (rewardedInterstitialAd != null) {
             adHolder.isEarnedReward = false
             adHolder.isShowing = true
@@ -743,7 +781,9 @@ class AdmobManager @Inject constructor(
         activity: Activity,
         adHolder: RewardedAdHolder,
     ) {
-        val rewardedAd = adHolder.rewardedAd
+        val rewardedAd = adHolder.rewardedAd ?: consumeRewardedAd(adHolder.adPlace)?.also {
+            adHolder.rewardedAd = it
+        }
         if (rewardedAd != null) {
             adHolder.isEarnedReward = false
             adHolder.isShowing = true
@@ -850,9 +890,15 @@ class AdmobManager @Inject constructor(
     private fun loadInterstitialIfNeed(
         activity: Activity,
         adHolder: InterstitialAdHolder,
+        waterfallIndex: Int = 0,
     ) {
-        if (adHolder.interstitialAd != null) {
+        if (adHolder.interstitialAd != null || findLoadedFullScreenAdUnitHolder(adHolder.adPlace) != null) {
             notifyAdFullScreenLoaded(adHolder.adPlace.placeName)
+            if (adHolder.isWaitLoadToShow) {
+                activity.removeLoader()
+                adHolder.isWaitLoadToShow = false
+                showInterstitial(activity, adHolder)
+            }
             return
         }
         if (adHolder.isLoading) {
@@ -862,14 +908,35 @@ class AdmobManager @Inject constructor(
             return
         }
         adHolder.isLoading = true
+        val waterfallAdUnitIds = adHolder.adPlace.getWaterfallAdUnitIds()
+        // Try configured high-floor ids first, then fall back to the normal ad id.
+        Log.d(TAG, "${adHolder.adPlace.placeName} waterfallAdUnitIds: $waterfallAdUnitIds  adHolder.adPlace.highFloorAdIds ${adHolder.adPlace.highFloorAdIds} waterfallIndex $waterfallIndex")
+        val adUnitId = waterfallAdUnitIds[waterfallIndex]
+        val adUnitHolder = getOrCreateFullScreenAdUnitHolder(adHolder.adPlace, adUnitId)
+        if (adUnitHolder.isLoading) {
+            markFullScreenAdUnitWaiter(adHolder, adUnitHolder, activity)
+            return
+        }
+        adUnitHolder.isLoading = true
+        markFullScreenAdUnitWaiter(adHolder, adUnitHolder, activity)
+        scheduleFullScreenLoadTimeout(adUnitHolder, adUnitId, adHolder.adPlace.adType)
 
         val loadCallback = object : InterstitialAdLoadCallback() {
             override fun onAdFailedToLoad(p0: LoadAdError) {
                 super.onAdFailedToLoad(p0)
                 val placeName = adHolder.adPlace.placeName
-                Log.i(TAG, "Interstitial load failed $placeName ${p0.message}")
-                adHolder.isLoading = false
-                if (adHolder.isWaitLoadToShow) {
+                Log.i(TAG, "Interstitial load failed $placeName $adUnitId ${p0.message}")
+                adUnitHolder.isLoading = false
+                val nextWaterfallIndex = waterfallIndex + 1
+                if (nextWaterfallIndex < waterfallAdUnitIds.size) {
+                    resumeSiblingWaitersOnFail(adUnitHolder, placeName, adUnitId)
+                    Log.i(TAG, "Interstitial waterfall next $placeName ${waterfallAdUnitIds[nextWaterfallIndex]}")
+                    loadInterstitialIfNeed(activity, adHolder, nextWaterfallIndex)
+                    return
+                }
+                val wasWaitLoadToShow = adHolder.isWaitLoadToShow
+                onFullScreenAdUnitFailed(adHolder, adUnitHolder, adUnitId)
+                if (wasWaitLoadToShow) {
                     activity.removeLoader()
                     notifyAdFullScreenNotValidOrLoadFailed(placeName)
                     notifyAdFullScreenCompleted(placeName, false)
@@ -934,19 +1001,22 @@ class AdmobManager @Inject constructor(
             override fun onAdLoaded(p0: InterstitialAd) {
                 super.onAdLoaded(p0)
                 val placeName = adHolder.adPlace.placeName
-                Log.i(TAG, "Interstitial loaded $placeName")
-                adHolder.isLoading = false
-                adHolder.interstitialAd = p0
+                Log.i(TAG, "Interstitial loaded $placeName $adUnitId")
                 p0.setOnPaidEventListener { adValue ->
                     trackAdjustAdRevenue(
-                        adUnitId = adHolder.adPlace.adId,
+                        adUnitId = adUnitId,
                         loadedAdapterResponseInfo = p0.responseInfo?.loadedAdapterResponseInfo,
                         adValueMicros = adValue.valueMicros,
                         adValueCurrencyCode = adValue.currencyCode
                     )
                 }
                 p0.setImmersiveMode(true)
-                notifyAdFullScreenLoaded(placeName)
+                adUnitHolder.isLoading = false
+                adUnitHolder.interstitialAd = p0
+                onFullScreenAdUnitLoaded(adHolder, adUnitHolder)
+                if (showFirstWaitLoadToShowAdIfNeed(adUnitHolder)) {
+                    return
+                }
                 if (adHolder.isWaitLoadToShow) {
                     activity.removeLoader()
                     adHolder.isWaitLoadToShow = false
@@ -957,7 +1027,7 @@ class AdmobManager @Inject constructor(
         }
         InterstitialAd.load(
             activity,
-            adHolder.adPlace.adId,
+            adUnitId,
             getAdRequest(),
             loadCallback
         )
@@ -966,23 +1036,48 @@ class AdmobManager @Inject constructor(
     private fun loadRewardedInterstitialIfNeed(
         activity: Activity,
         adHolder: RewardedInterstitialAdHolder,
+        waterfallIndex: Int = 0,
     ) {
-        if (adHolder.rewardedInterstitialAd != null) {
+        if (adHolder.rewardedInterstitialAd != null || findLoadedFullScreenAdUnitHolder(adHolder.adPlace) != null) {
+            notifyAdFullScreenLoaded(adHolder.adPlace.placeName)
+            if (adHolder.isWaitLoadToShow) {
+                adHolder.isWaitLoadToShow = false
+                showRewardedInterstitialVideo(activity, adHolder)
+            }
             return
         }
         if (adHolder.isLoading) {
             return
         }
         adHolder.isLoading = true
+        val waterfallAdUnitIds = adHolder.adPlace.getWaterfallAdUnitIds()
+        val adUnitId = waterfallAdUnitIds[waterfallIndex]
+        val adUnitHolder = getOrCreateFullScreenAdUnitHolder(adHolder.adPlace, adUnitId)
+        if (adUnitHolder.isLoading) {
+            markFullScreenAdUnitWaiter(adHolder, adUnitHolder, activity)
+            return
+        }
+        adUnitHolder.isLoading = true
+        markFullScreenAdUnitWaiter(adHolder, adUnitHolder, activity)
+        scheduleFullScreenLoadTimeout(adUnitHolder, adUnitId, adHolder.adPlace.adType)
 
         val loadCallback = object : RewardedInterstitialAdLoadCallback() {
 
             override fun onAdFailedToLoad(p0: LoadAdError) {
                 super.onAdFailedToLoad(p0)
                 val placeName = adHolder.adPlace.placeName
-                Log.i(TAG, "RewardedInterstitial load failed $placeName ${p0.message}")
-                adHolder.isLoading = false
-                if (adHolder.isWaitLoadToShow) {
+                Log.i(TAG, "RewardedInterstitial load failed $placeName $adUnitId ${p0.message}")
+                adUnitHolder.isLoading = false
+                val nextWaterfallIndex = waterfallIndex + 1
+                if (nextWaterfallIndex < waterfallAdUnitIds.size) {
+                    resumeSiblingWaitersOnFail(adUnitHolder, placeName, adUnitId)
+                    Log.i(TAG, "RewardedInterstitial waterfall next $placeName ${waterfallAdUnitIds[nextWaterfallIndex]}")
+                    loadRewardedInterstitialIfNeed(activity, adHolder, nextWaterfallIndex)
+                    return
+                }
+                val wasWaitLoadToShow = adHolder.isWaitLoadToShow
+                onFullScreenAdUnitFailed(adHolder, adUnitHolder, adUnitId)
+                if (wasWaitLoadToShow) {
                     activity.removeLoader()
                     notifyAdFullScreenNotValidOrLoadFailed(placeName)
                     notifyAdFullScreenCompleted(placeName, false)
@@ -1051,19 +1146,22 @@ class AdmobManager @Inject constructor(
             override fun onAdLoaded(p0: RewardedInterstitialAd) {
                 super.onAdLoaded(p0)
                 val placeName = adHolder.adPlace.placeName
-                Log.i(TAG, "RewardedInterstitial loaded $placeName")
-                adHolder.isLoading = false
-                adHolder.rewardedInterstitialAd = p0
+                Log.i(TAG, "RewardedInterstitial loaded $placeName $adUnitId")
                 p0.setOnPaidEventListener { adValue ->
                     trackAdjustAdRevenue(
-                        adUnitId = adHolder.adPlace.adId,
+                        adUnitId = adUnitId,
                         loadedAdapterResponseInfo = p0.responseInfo?.loadedAdapterResponseInfo,
                         adValueMicros = adValue.valueMicros,
                         adValueCurrencyCode = adValue.currencyCode
                     )
                 }
                 p0.setImmersiveMode(true)
-                notifyAdFullScreenLoaded(placeName)
+                adUnitHolder.isLoading = false
+                adUnitHolder.rewardedInterstitialAd = p0
+                onFullScreenAdUnitLoaded(adHolder, adUnitHolder)
+                if (showFirstWaitLoadToShowAdIfNeed(adUnitHolder)) {
+                    return
+                }
                 if (adHolder.isWaitLoadToShow) {
                     adHolder.isWaitLoadToShow = false
                     showRewardedInterstitialVideo(activity, adHolder)
@@ -1074,7 +1172,7 @@ class AdmobManager @Inject constructor(
 
         RewardedInterstitialAd.load(
             activity,
-            adHolder.adPlace.adId,
+            adUnitId,
             getAdRequest(),
             loadCallback
         )
@@ -1083,23 +1181,49 @@ class AdmobManager @Inject constructor(
     private fun loadRewardedIfNeed(
         activity: Activity,
         adHolder: RewardedAdHolder,
+        waterfallIndex: Int = 0,
     ) {
-        if (adHolder.rewardedAd != null) {
+        if (adHolder.rewardedAd != null || findLoadedFullScreenAdUnitHolder(adHolder.adPlace) != null) {
+            notifyAdFullScreenLoaded(adHolder.adPlace.placeName)
+            if (adHolder.isWaitLoadToShow) {
+                activity.removeLoader()
+                adHolder.isWaitLoadToShow = false
+                showRewardedVideo(activity, adHolder)
+            }
             return
         }
         if (adHolder.isLoading) {
             return
         }
         adHolder.isLoading = true
+        val waterfallAdUnitIds = adHolder.adPlace.getWaterfallAdUnitIds()
+        val adUnitId = waterfallAdUnitIds[waterfallIndex]
+        val adUnitHolder = getOrCreateFullScreenAdUnitHolder(adHolder.adPlace, adUnitId)
+        if (adUnitHolder.isLoading) {
+            markFullScreenAdUnitWaiter(adHolder, adUnitHolder, activity)
+            return
+        }
+        adUnitHolder.isLoading = true
+        markFullScreenAdUnitWaiter(adHolder, adUnitHolder, activity)
+        scheduleFullScreenLoadTimeout(adUnitHolder, adUnitId, adHolder.adPlace.adType)
 
         val loadCallback = object : RewardedAdLoadCallback() {
 
             override fun onAdFailedToLoad(p0: LoadAdError) {
                 super.onAdFailedToLoad(p0)
                 val placeName = adHolder.adPlace.placeName
-                Log.i(TAG, "Rewarded load failed $placeName ${p0.message}")
-                adHolder.isLoading = false
-                if (adHolder.isWaitLoadToShow) {
+                Log.i(TAG, "Rewarded load failed $placeName $adUnitId ${p0.message}")
+                adUnitHolder.isLoading = false
+                val nextWaterfallIndex = waterfallIndex + 1
+                if (nextWaterfallIndex < waterfallAdUnitIds.size) {
+                    resumeSiblingWaitersOnFail(adUnitHolder, placeName, adUnitId)
+                    Log.i(TAG, "Rewarded waterfall next $placeName ${waterfallAdUnitIds[nextWaterfallIndex]}")
+                    loadRewardedIfNeed(activity, adHolder, nextWaterfallIndex)
+                    return
+                }
+                val wasWaitLoadToShow = adHolder.isWaitLoadToShow
+                onFullScreenAdUnitFailed(adHolder, adUnitHolder, adUnitId)
+                if (wasWaitLoadToShow) {
                     notifyAdFullScreenNotValidOrLoadFailed(placeName)
                     notifyAdFullScreenCompleted(placeName, false)
                     adHolder.reset()
@@ -1161,19 +1285,22 @@ class AdmobManager @Inject constructor(
             override fun onAdLoaded(p0: RewardedAd) {
                 super.onAdLoaded(p0)
                 val placeName = adHolder.adPlace.placeName
-                Log.i(TAG, "Rewarded loaded $placeName")
-                adHolder.isLoading = false
-                adHolder.rewardedAd = p0
+                Log.i(TAG, "Rewarded loaded $placeName $adUnitId")
                 p0.setOnPaidEventListener { adValue ->
                     trackAdjustAdRevenue(
-                        adUnitId = adHolder.adPlace.adId,
+                        adUnitId = adUnitId,
                         loadedAdapterResponseInfo = p0.responseInfo?.loadedAdapterResponseInfo,
                         adValueMicros = adValue.valueMicros,
                         adValueCurrencyCode = adValue.currencyCode
                     )
                 }
                 p0.setImmersiveMode(true)
-                notifyAdFullScreenLoaded(placeName)
+                adUnitHolder.isLoading = false
+                adUnitHolder.rewardedAd = p0
+                onFullScreenAdUnitLoaded(adHolder, adUnitHolder)
+                if (showFirstWaitLoadToShowAdIfNeed(adUnitHolder)) {
+                    return
+                }
                 if (adHolder.isWaitLoadToShow) {
                     activity.removeLoader()
                     adHolder.isWaitLoadToShow = false
@@ -1186,7 +1313,7 @@ class AdmobManager @Inject constructor(
 
         RewardedAd.load(
             activity,
-            adHolder.adPlace.adId,
+            adUnitId,
             getAdRequest(),
             loadCallback
         )
@@ -1195,7 +1322,8 @@ class AdmobManager @Inject constructor(
     private fun loadNativeAdIfNeed(
         activity: Activity,
         adHolder: NativeAdHolder,
-        isReload: Boolean
+        isReload: Boolean,
+        waterfallIndex: Int = 0
     ) {
         val placeName = adHolder.adPlace.placeName
         if (isNotAbleToVisibleAdsToUser(placeName)) {
@@ -1238,12 +1366,14 @@ class AdmobManager @Inject constructor(
             return
         }
         adHolder.isLoading = true
+        val waterfallAdUnitIds = adHolder.adPlace.getWaterfallAdUnitIds()
+        val adUnitId = waterfallAdUnitIds[waterfallIndex]
 
         applicationScope.launch {
             val adLoader = withContext(Dispatchers.IO) {
-                AdLoader.Builder(activity, adHolder.adPlace.adId)
+                AdLoader.Builder(activity, adUnitId)
                     .forNativeAd { ad: NativeAd ->
-                        Log.i(TAG, "Native loaded $placeName")
+                        Log.i(TAG, "Native loaded $placeName $adUnitId")
                         Log.i(TAG, "Native loaded $placeName ${ad.headline}")
                         val isCurrentAdTest = TestNativeAdHeadlineUtils.containsBlockedHeadline(ad.headline)
                         if (isTurnOnAdPlacesDisabledWhenDetectTestAd && isCurrentAdTest) {
@@ -1255,7 +1385,7 @@ class AdmobManager @Inject constructor(
                         adHolder.loadedAtMs = SystemClock.elapsedRealtime()
                         ad.setOnPaidEventListener { adValue ->
                             trackAdjustAdRevenue(
-                                adUnitId = adHolder.adPlace.adId,
+                                adUnitId = adUnitId,
                                 loadedAdapterResponseInfo = ad.responseInfo?.loadedAdapterResponseInfo,
                                 adValueMicros = adValue.valueMicros,
                                 adValueCurrencyCode = adValue.currencyCode
@@ -1280,8 +1410,14 @@ class AdmobManager @Inject constructor(
 
                         override fun onAdFailedToLoad(p0: LoadAdError) {
                             super.onAdFailedToLoad(p0)
-                            Log.i(TAG, "Native load failed $placeName ${p0.message} $p0")
+                            Log.i(TAG, "Native load failed $placeName $adUnitId ${p0.message} $p0")
                             adHolder.isLoading = false
+                            val nextWaterfallIndex = waterfallIndex + 1
+                            if (nextWaterfallIndex < waterfallAdUnitIds.size) {
+                                Log.i(TAG, "Native waterfall next $placeName ${waterfallAdUnitIds[nextWaterfallIndex]}")
+                                loadNativeAdIfNeed(activity, adHolder, isReload, nextWaterfallIndex)
+                                return
+                            }
 
                             val nativeAdConfig = remoteConfigRepository.getNativeAdConfig()
                             val isEnableRetry = nativeAdConfig.isEnableRetry
@@ -1374,7 +1510,8 @@ class AdmobManager @Inject constructor(
         activity: Activity,
         adHolder: BannerAdHolder,
         isPreload: Boolean,
-        identifier: String
+        identifier: String,
+        waterfallIndex: Int = 0
     ) {
         val placeName = adHolder.adPlace.placeName
         if (isNotAbleToVisibleAdsToUser(placeName)) {
@@ -1441,6 +1578,8 @@ class AdmobManager @Inject constructor(
             return
         }
         adHolder.isLoading = true
+        val waterfallAdUnitIds = adHolder.adPlace.getWaterfallAdUnitIds()
+        val adUnitId = waterfallAdUnitIds[waterfallIndex]
 
         val adSize = when (bannerAdPlace.bannerSize) {
             BannerSize.Anchored -> AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(
@@ -1461,11 +1600,11 @@ class AdmobManager @Inject constructor(
 
         adHolder.identifier = identifier
         bannerAd = AdView(activity).apply {
-            adUnitId = adHolder.adPlace.adId
+            this.adUnitId = adUnitId
             setAdSize(adSize)
             setOnPaidEventListener { adValue ->
                 trackAdjustAdRevenue(
-                    adUnitId = adHolder.adPlace.adId,
+                    adUnitId = adUnitId,
                     loadedAdapterResponseInfo = responseInfo?.loadedAdapterResponseInfo,
                     adValueMicros = adValue.valueMicros,
                     adValueCurrencyCode = adValue.currencyCode
@@ -1474,8 +1613,14 @@ class AdmobManager @Inject constructor(
             adListener = object : AdListener() {
                 override fun onAdFailedToLoad(p0: LoadAdError) {
                     super.onAdFailedToLoad(p0)
-                    Log.i(TAG, "Banner loaded failed $placeName ${p0.message} $p0")
+                    Log.i(TAG, "Banner loaded failed $placeName $adUnitId ${p0.message} $p0")
                     adHolder.isLoading = false
+                    val nextWaterfallIndex = waterfallIndex + 1
+                    if (nextWaterfallIndex < waterfallAdUnitIds.size) {
+                        Log.i(TAG, "Banner waterfall next $placeName ${waterfallAdUnitIds[nextWaterfallIndex]}")
+                        loadBannerAdIfNeed(activity, adHolder, isPreload, identifier, nextWaterfallIndex)
+                        return
+                    }
 
                     val bannerAdConfig = remoteConfigRepository.getBannerAdConfig()
                     val isEnableRetry = bannerAdConfig.isEnableRetry
@@ -1527,7 +1672,7 @@ class AdmobManager @Inject constructor(
 
                 override fun onAdLoaded() {
                     super.onAdLoaded()
-                    Log.i(TAG, "Banner loaded $placeName")
+                    Log.i(TAG, "Banner loaded $placeName $adUnitId")
                     adHolder.isLoading = false
                     adHolder.bannerAd = bannerAd
 
@@ -1557,6 +1702,215 @@ class AdmobManager @Inject constructor(
             }
         }
         bannerAd.loadAd(getAdRequest(bannerAdPlace.isCollapsible))
+    }
+
+    private fun AdPlace.getWaterfallAdUnitIds(): List<String> {
+        // highFloorAdIds are prioritized, adId is kept as the guaranteed fallback.
+        return (highFloorAdIds + adId)
+            .filter { it.isNotBlank() }
+            .distinct()
+            .ifEmpty { listOf(adId) }
+    }
+
+    private fun getFullScreenAdUnitKey(adPlace: AdPlace, adUnitId: String): FullScreenAdUnitKey {
+        return FullScreenAdUnitKey(adTypeKey = adPlace.adType.key, adUnitId = adUnitId)
+    }
+
+    private fun getOrCreateFullScreenAdUnitHolder(
+        adPlace: AdPlace,
+        adUnitId: String
+    ): FullScreenAdUnitHolder {
+        val key = getFullScreenAdUnitKey(adPlace, adUnitId)
+        return fullScreenAdUnitHolderMap.getOrPut(key) { FullScreenAdUnitHolder() }
+    }
+
+    private fun findLoadedFullScreenAdUnitHolder(adPlace: AdPlace): FullScreenAdUnitHolder? {
+        return adPlace.getWaterfallAdUnitIds()
+            .firstNotNullOfOrNull { adUnitId ->
+                fullScreenAdUnitHolderMap[getFullScreenAdUnitKey(adPlace, adUnitId)]
+                    ?.takeIf { it.isLoaded(adPlace.adType) }
+            }
+    }
+
+    private fun markFullScreenAdUnitWaiter(
+        adHolder: AdHolder,
+        adUnitHolder: FullScreenAdUnitHolder,
+        activity: Activity
+    ) {
+        adHolder.isLoading = true
+        adUnitHolder.waiterActivities[adHolder.adPlace.placeName] = activity
+        if (adHolder.isWaitLoadToShow) {
+            adUnitHolder.waitLoadToShowActivities[adHolder.adPlace.placeName] = activity
+            activity.showLoader()
+        }
+    }
+
+    private fun onFullScreenAdUnitLoaded(
+        adHolder: AdHolder,
+        adUnitHolder: FullScreenAdUnitHolder
+    ) {
+        // A single loaded ad unit can unblock every placement that was waiting for it.
+        val notifiedPlaceNames = (adUnitHolder.waiterActivities.keys + adHolder.adPlace.placeName).distinct()
+        notifiedPlaceNames.forEach { placeName ->
+            adHolderFullScreenMap[placeName]?.isLoading = false
+            notifyAdFullScreenLoaded(placeName)
+        }
+        adUnitHolder.waiterActivities.clear()
+        adHolder.isLoading = false
+    }
+
+    private fun onFullScreenAdUnitFailed(
+        adHolder: AdHolder,
+        adUnitHolder: FullScreenAdUnitHolder,
+        adUnitId: String
+    ) {
+        // The owner (adHolder) has exhausted its own waterfall and is handled by the
+        // caller's retry/fail logic. Siblings that share this ad unit continue their own
+        // waterfall independently instead of being dropped.
+        resumeSiblingWaitersOnFail(adUnitHolder, adHolder.adPlace.placeName, adUnitId)
+        adHolder.isLoading = false
+    }
+
+    /**
+     * Handles every waiter of a just-failed ad unit except [ownerPlaceName]:
+     * if the placement still has a lower tier in its own waterfall it resumes there,
+     * otherwise it is notified failed. Also resets the owner's loading flag and clears
+     * the waiter collections on [adUnitHolder].
+     */
+    private fun resumeSiblingWaitersOnFail(
+        adUnitHolder: FullScreenAdUnitHolder,
+        ownerPlaceName: IAdPlaceName?,
+        failedAdUnitId: String
+    ) {
+        val siblingPlaceNames = adUnitHolder.waiterActivities.keys.filter { it != ownerPlaceName }
+        siblingPlaceNames.forEach { placeName ->
+            val siblingHolder = adHolderFullScreenMap[placeName]
+            val activity = adUnitHolder.waiterActivities[placeName]
+            val siblingWaterfall = siblingHolder?.adPlace?.getWaterfallAdUnitIds().orEmpty()
+            val siblingNextIndex = siblingWaterfall.indexOf(failedAdUnitId) + 1
+            siblingHolder?.isLoading = false
+            val canResume = siblingHolder != null && activity != null &&
+                    !activity.isDestroyed && !activity.isFinishing &&
+                    siblingNextIndex in 1 until siblingWaterfall.size
+            if (canResume) {
+                Log.i(TAG, "FullScreen sibling waterfall next $placeName ${siblingWaterfall[siblingNextIndex]}")
+                resumeFullScreenWaiter(siblingHolder!!, activity!!, siblingNextIndex)
+            } else {
+                notifyAdFullScreenNotValidOrLoadFailed(placeName)
+                if (siblingHolder?.isWaitLoadToShow == true) {
+                    activity?.removeLoader()
+                    siblingHolder.isWaitLoadToShow = false
+                    notifyAdFullScreenCompleted(placeName, false)
+                }
+            }
+        }
+        ownerPlaceName?.let { adHolderFullScreenMap[it] }?.isLoading = false
+        adUnitHolder.waiterActivities.clear()
+        adUnitHolder.waitLoadToShowActivities.clear()
+    }
+
+    private fun scheduleFullScreenLoadTimeout(
+        adUnitHolder: FullScreenAdUnitHolder,
+        adUnitId: String,
+        adType: AdType
+    ) {
+        val loadId = ++adUnitHolder.loadId
+        applicationScope.launch {
+            delay(FULL_SCREEN_LOAD_TIMEOUT_MS)
+            if (adUnitHolder.loadId != loadId || !adUnitHolder.isLoading || adUnitHolder.isLoaded(adType)) {
+                return@launch
+            }
+            Log.i(TAG, "FullScreen load timeout $adUnitId, releasing stuck waiters")
+            adUnitHolder.isLoading = false
+            // No distinguished owner on timeout: every waiter resumes its own waterfall or fails.
+            resumeSiblingWaitersOnFail(adUnitHolder, ownerPlaceName = null, failedAdUnitId = adUnitId)
+        }
+    }
+
+    private fun resumeFullScreenWaiter(
+        adHolder: AdHolder,
+        activity: Activity,
+        waterfallIndex: Int
+    ) {
+        when (adHolder) {
+            is InterstitialAdHolder -> loadInterstitialIfNeed(activity, adHolder, waterfallIndex)
+            is RewardedInterstitialAdHolder -> loadRewardedInterstitialIfNeed(activity, adHolder, waterfallIndex)
+            is RewardedAdHolder -> loadRewardedIfNeed(activity, adHolder, waterfallIndex)
+            else -> {}
+        }
+    }
+
+    private fun showFirstWaitLoadToShowAdIfNeed(adUnitHolder: FullScreenAdUnitHolder): Boolean {
+        // Only one full-screen ad can be shown from a shared load. Complete the other
+        // wait-to-show placements so their callers are not left waiting.
+        val firstWaiter = adUnitHolder.waitLoadToShowActivities.entries.firstOrNull() ?: return false
+        adUnitHolder.waitLoadToShowActivities.remove(firstWaiter.key)
+        adUnitHolder.waitLoadToShowActivities.forEach { (placeName, activity) ->
+            activity.removeLoader()
+            adHolderFullScreenMap[placeName]?.isWaitLoadToShow = false
+            notifyAdFullScreenCompleted(placeName, false)
+        }
+        adUnitHolder.waitLoadToShowActivities.clear()
+
+        val adHolder = adHolderFullScreenMap[firstWaiter.key]
+        if (adHolder == null) {
+            firstWaiter.value.removeLoader()
+            return false
+        }
+        adHolder.isWaitLoadToShow = false
+        firstWaiter.value.removeLoader()
+        when (adHolder) {
+            is InterstitialAdHolder -> showInterstitial(firstWaiter.value, adHolder)
+            is RewardedInterstitialAdHolder -> showRewardedInterstitialVideo(firstWaiter.value, adHolder)
+            is RewardedAdHolder -> showRewardedVideo(firstWaiter.value, adHolder)
+            else -> return false
+        }
+        return true
+    }
+
+    private fun consumeInterstitialAd(adPlace: AdPlace): InterstitialAd? {
+        // Move a shared loaded ad into the placement holder right before showing it.
+        adPlace.getWaterfallAdUnitIds().forEach { adUnitId ->
+            val key = getFullScreenAdUnitKey(adPlace, adUnitId)
+            val adUnitHolder = fullScreenAdUnitHolderMap[key] ?: return@forEach
+            val ad = adUnitHolder.interstitialAd ?: return@forEach
+            adUnitHolder.interstitialAd = null
+            if (!adUnitHolder.isLoading && !adUnitHolder.isLoaded(adPlace.adType)) {
+                fullScreenAdUnitHolderMap.remove(key)
+            }
+            return ad
+        }
+        return null
+    }
+
+    private fun consumeRewardedInterstitialAd(adPlace: AdPlace): RewardedInterstitialAd? {
+        // Move a shared loaded ad into the placement holder right before showing it.
+        adPlace.getWaterfallAdUnitIds().forEach { adUnitId ->
+            val key = getFullScreenAdUnitKey(adPlace, adUnitId)
+            val adUnitHolder = fullScreenAdUnitHolderMap[key] ?: return@forEach
+            val ad = adUnitHolder.rewardedInterstitialAd ?: return@forEach
+            adUnitHolder.rewardedInterstitialAd = null
+            if (!adUnitHolder.isLoading && !adUnitHolder.isLoaded(adPlace.adType)) {
+                fullScreenAdUnitHolderMap.remove(key)
+            }
+            return ad
+        }
+        return null
+    }
+
+    private fun consumeRewardedAd(adPlace: AdPlace): RewardedAd? {
+        // Move a shared loaded ad into the placement holder right before showing it.
+        adPlace.getWaterfallAdUnitIds().forEach { adUnitId ->
+            val key = getFullScreenAdUnitKey(adPlace, adUnitId)
+            val adUnitHolder = fullScreenAdUnitHolderMap[key] ?: return@forEach
+            val ad = adUnitHolder.rewardedAd ?: return@forEach
+            adUnitHolder.rewardedAd = null
+            if (!adUnitHolder.isLoading && !adUnitHolder.isLoaded(adPlace.adType)) {
+                fullScreenAdUnitHolderMap.remove(key)
+            }
+            return ad
+        }
+        return null
     }
 
     private fun trackAdjustAdRevenue(
@@ -1723,7 +2077,7 @@ class AdmobManager @Inject constructor(
         adPlace: AdPlace,
         isNeedUpdateAdPlace: Boolean
     ): AdHolder {
-        var adHolder = adHolderFullScreenMap[adPlace.adId]
+        var adHolder = adHolderFullScreenMap[adPlace.placeName]
         if (adHolder == null) {
             adHolder = when (adPlace.adType) {
                 AdType.Interstitial -> InterstitialAdHolder(adPlace = adPlace)
@@ -1731,7 +2085,7 @@ class AdmobManager @Inject constructor(
                 AdType.RewardedVideo -> RewardedAdHolder(adPlace = adPlace)
                 else -> RewardedAdHolder(adPlace = adPlace)
             }
-            adHolderFullScreenMap[adPlace.adId] = adHolder
+            adHolderFullScreenMap[adPlace.placeName] = adHolder
         }
         if (isNeedUpdateAdPlace) {
             adHolder.adPlace = adPlace
@@ -1740,13 +2094,14 @@ class AdmobManager @Inject constructor(
     }
 
     private fun isFullScreenAdPlacedLoaded(adPlace: AdPlace): Boolean {
-        val adHolder = adHolderFullScreenMap[adPlace.adId] ?: return false
-        return when (adPlace.adType) {
+        val adHolder = adHolderFullScreenMap[adPlace.placeName]
+        val isPlacementAdLoaded = when (adPlace.adType) {
             AdType.Interstitial -> adHolder is InterstitialAdHolder && adHolder.interstitialAd != null
             AdType.RewardedInterstitial -> adHolder is RewardedInterstitialAdHolder && adHolder.rewardedInterstitialAd != null
             AdType.RewardedVideo -> adHolder is RewardedAdHolder && adHolder.rewardedAd != null
             else -> false
         }
+        return isPlacementAdLoaded || findLoadedFullScreenAdUnitHolder(adPlace) != null
     }
 
     private fun isBannerNativeAdPlacedLoaded(adPlace: AdPlace): Boolean {
@@ -1898,6 +2253,7 @@ class AdmobManager @Inject constructor(
     override fun isRewardReady(adPlaceName: IAdPlaceName): Boolean {
         val adPlace = remoteConfigRepository.getAdPlaceBy(adPlaceName)
         val adHolder = getOrCreateAdHolderFullScreenBy(adPlace, true)
-        return (adHolder as? RewardedAdHolder)?.rewardedAd != null
+        return (adHolder as? RewardedAdHolder)?.rewardedAd != null ||
+                findLoadedFullScreenAdUnitHolder(adPlace) != null
     }
 }
