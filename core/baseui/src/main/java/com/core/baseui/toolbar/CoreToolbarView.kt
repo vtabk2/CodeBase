@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.LayoutInflater
+import android.view.View
 import android.widget.LinearLayout
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.withStyledAttributes
@@ -21,6 +22,7 @@ class CoreToolbarView @JvmOverloads constructor(context: Context, attrs: Attribu
         set(value) {
             field = value
             viewBinding.rivBack.paddingRipple = value
+            viewBinding.rivHelp.paddingRipple = value
             viewBinding.rivAction.paddingRipple = value
             viewBinding.rivActionExtra.paddingRipple = value
             invalidate()
@@ -68,6 +70,65 @@ class CoreToolbarView @JvmOverloads constructor(context: Context, attrs: Attribu
         set(value) {
             field = value
             viewBinding.rivBack.updateWidthHeight(value)
+            invalidate()
+        }
+
+    var applyScaleXBack: Boolean = viewBinding.rivBack.applyScaleX
+        set(value) {
+            field = value
+            viewBinding.rivBack.applyScaleX = value
+            invalidate()
+        }
+
+    var showHelp: Boolean = false
+        set(value) {
+            field = value
+            viewBinding.rivHelp.visibleIf(value)
+            invalidate()
+        }
+
+    var resHelp: Int = R.drawable.core_selector_ic_back
+        set(value) {
+            field = value
+            viewBinding.rivHelp.iconRippleRes = value
+            invalidate()
+        }
+
+    var isEnableHelp: Boolean = true
+        set(value) {
+            field = value
+            viewBinding.rivHelp.isEnabled = value
+            invalidate()
+        }
+
+    var marginStartHelp: Int = (viewBinding.rivHelp.layoutParams as? MarginLayoutParams)?.marginStart ?: 0
+        set(value) {
+            field = value
+            (viewBinding.rivHelp.layoutParams as? MarginLayoutParams)?.let { params ->
+                params.marginStart = value
+                viewBinding.rivHelp.layoutParams = params
+            }
+            invalidate()
+        }
+
+    var resBackgroundHelp: Int = 0
+        set(value) {
+            field = value
+            viewBinding.rivHelp.setBackgroundResource(value)
+            invalidate()
+        }
+
+    var widthHeightHelp: Int = 0
+        set(value) {
+            field = value
+            viewBinding.rivHelp.updateWidthHeight(value)
+            invalidate()
+        }
+
+    var applyScaleXHelp: Boolean = viewBinding.rivHelp.applyScaleX
+        set(value) {
+            field = value
+            viewBinding.rivHelp.applyScaleX = value
             invalidate()
         }
 
@@ -244,6 +305,13 @@ class CoreToolbarView @JvmOverloads constructor(context: Context, attrs: Attribu
             invalidate()
         }
 
+    var applyScaleXAction: Boolean = viewBinding.rivAction.applyScaleX
+        set(value) {
+            field = value
+            viewBinding.rivAction.applyScaleX = value
+            invalidate()
+        }
+
     var showActionExtra: Boolean = false
         set(value) {
             field = value
@@ -279,7 +347,38 @@ class CoreToolbarView @JvmOverloads constructor(context: Context, attrs: Attribu
             invalidate()
         }
 
+    var applyScaleXActionExtra: Boolean = viewBinding.rivActionExtra.applyScaleX
+        set(value) {
+            field = value
+            viewBinding.rivActionExtra.applyScaleX = value
+            invalidate()
+        }
+
     var onToolbarListener: OnToolbarListener? = null
+
+    fun setBackAndActionInvisible(invisible: Boolean) {
+        viewBinding.rivBack.visibility = if (invisible) {
+            View.INVISIBLE
+        } else if (showBack) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+        viewBinding.rivHelp.visibility = if (invisible) {
+            View.INVISIBLE
+        } else if (showHelp) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+        viewBinding.rivAction.visibility = if (invisible) {
+            View.INVISIBLE
+        } else if (showAction) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+    }
 
     init {
         attrs?.let {
@@ -298,6 +397,19 @@ class CoreToolbarView @JvmOverloads constructor(context: Context, attrs: Attribu
                 if (hasValue(R.styleable.CoreToolbarView_ctv_ic_back_width_height)) {
                     widthHeightBack = getDimensionPixelSize(R.styleable.CoreToolbarView_ctv_ic_back_width_height, widthHeightBack)
                 }
+                applyScaleXBack = getBoolean(R.styleable.CoreToolbarView_ctv_ic_back_apply_scale_x, applyScaleXBack)
+
+                showHelp = getBoolean(R.styleable.CoreToolbarView_ctv_ic_help_show, showHelp)
+                resHelp = getResourceId(R.styleable.CoreToolbarView_ctv_ic_help_icon, resHelp)
+                isEnableHelp = getBoolean(R.styleable.CoreToolbarView_ctv_ic_help_enable, isEnableHelp)
+                marginStartHelp = getDimensionPixelSize(R.styleable.CoreToolbarView_ctv_ic_help_margin_start, marginStartHelp)
+                if (hasValue(R.styleable.CoreToolbarView_ctv_ic_help_background)) {
+                    resBackgroundHelp = getResourceId(R.styleable.CoreToolbarView_ctv_ic_help_background, resBackgroundHelp)
+                }
+                if (hasValue(R.styleable.CoreToolbarView_ctv_ic_help_width_height)) {
+                    widthHeightHelp = getDimensionPixelSize(R.styleable.CoreToolbarView_ctv_ic_help_width_height, widthHeightHelp)
+                }
+                applyScaleXHelp = getBoolean(R.styleable.CoreToolbarView_ctv_ic_help_apply_scale_x, applyScaleXHelp)
 
                 title = getString(R.styleable.CoreToolbarView_ctv_tv_title) ?: title
                 showTitle = getBoolean(R.styleable.CoreToolbarView_ctv_tv_title_show, showTitle)
@@ -328,6 +440,7 @@ class CoreToolbarView @JvmOverloads constructor(context: Context, attrs: Attribu
                 if (hasValue(R.styleable.CoreToolbarView_ctv_ic_action_width_height)) {
                     widthHeightAction = getDimensionPixelSize(R.styleable.CoreToolbarView_ctv_ic_action_width_height, widthHeightAction)
                 }
+                applyScaleXAction = getBoolean(R.styleable.CoreToolbarView_ctv_ic_action_apply_scale_x, applyScaleXAction)
 
                 showActionExtra = getBoolean(R.styleable.CoreToolbarView_ctv_ic_action_extra_show, showActionExtra)
                 resActionExtra = getResourceId(R.styleable.CoreToolbarView_ctv_ic_action_extra_icon, resActionExtra)
@@ -344,11 +457,19 @@ class CoreToolbarView @JvmOverloads constructor(context: Context, attrs: Attribu
                         widthHeightActionExtra
                     )
                 }
+                applyScaleXActionExtra = getBoolean(
+                    R.styleable.CoreToolbarView_ctv_ic_action_extra_apply_scale_x,
+                    applyScaleXActionExtra
+                )
             }
         }
 
         viewBinding.rivBack.setOnSingleClick {
             onToolbarListener?.onBack()
+        }
+
+        viewBinding.rivHelp.setOnSingleClick {
+            onToolbarListener?.onHelp()
         }
 
         viewBinding.clTitle.setOnSingleClick {
@@ -412,6 +533,7 @@ class CoreToolbarView @JvmOverloads constructor(context: Context, attrs: Attribu
 
     interface OnToolbarListener {
         fun onBack() {}
+        fun onHelp() {}
         fun onUpDown(isUp: Boolean) {}
         fun onAction() {}
         fun onActionExtra() {}
