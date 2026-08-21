@@ -104,17 +104,15 @@ internal class RemoteConfigRepositoryImpl @Inject constructor(
         analyticsManager.logEvent(AnalyticsEvent.EVENT_REMOTE_CONFIG_FETCH)
         Log.e(TAG, "fetch loading")
         remoteConfigService.fetchAndActive { isSuccess ->
-            isFetching = false
             if (applicationContext.isAppDebuggable() /*|| BuildConfig.FLAVOR == "dev"*/) {
                 applicationContext.toast("fetch RemoteConfig Successfully!", Toasty.SUCCESS)
             }
             if (!isFetchComplete) {
                 Log.e(TAG, "fetch complete $isSuccess")
-                fetchRemoteConfigData(isNotifyComplete = true, isSuccess = true)
+                fetchRemoteConfigData(isNotifyComplete = true, isSuccess = isSuccess)
             } else {
-                fetchRemoteConfigData(isNotifyComplete = false, isSuccess = true)
+                fetchRemoteConfigData(isNotifyComplete = false, isSuccess = isSuccess)
             }
-            isFetchComplete = true
         }
         applicationScope.launch {
             delay(FETCH_REMOTE_CONFIG_TIMEOUT)
@@ -128,65 +126,76 @@ internal class RemoteConfigRepositoryImpl @Inject constructor(
                     applicationContext.toast("fetch RemoteConfig Timeout!", Toasty.WARNING)
                 }
                 Log.e(TAG, "fetch complete timeout")
-                fetchRemoteConfigData(isNotifyComplete = true, isSuccess = false)
+                notifyFetchComplete(isSuccess = false)
             }
-            isFetching = false
-            isFetchComplete = true
+        }
+    }
+
+    private fun notifyFetchComplete(isSuccess: Boolean) {
+        if (isFetchComplete) return
+        isFetchComplete = true
+        isFetching = false
+        applicationScope.launch {
+            _fetchStateCompleteFlow.emit(FetchRemoteConfigState.Complete(isSuccess))
         }
     }
 
     private fun fetchRemoteConfigData(isNotifyComplete: Boolean, isSuccess: Boolean) {
         applicationScope.launch {
-            val appConfigDeferred = async { getAppConfigRaw() }
-            val preventAdClickConfigDeferred = async { getPreventAdClickConfigRaw() }
-            val adsDisableByCountryDeferred = async { getAdsDisableByCountryRaw() }
-            val adPlacesDisableWhenDetectTestAdDeferred = async { getAdPlacesDisableWhenDetectTestAdRaw() }
-            val isTurnOnAdPlacesDisabledWhenDetectTestAdDeferred =
-                async { isTurnOnAdPlacesDisabledWhenDetectTestAdRaw() }
-            val splashScreenConfigDeferred = async { getSplashScreenConfigRaw() }
-            val languageActivityConfigDeferred = async { getLanguageActivityConfigRaw() }
-            val onBoardingConfigDeferred = async { getOnBoardingConfigRaw() }
-            val adPlacesDeferred = async { getAdPlacesRaw() }
-            val bannerAdConfigDeferred = async { getBannerAdConfigRaw() }
-            val nativeAdConfigDeferred = async { getNativeAdConfigRaw() }
-            val interstitialAdConfigDeferred = async { getInterstitialAdConfigRaw() }
-            val rewardedInterstitialAdConfigDeferred =
-                async { getRewardedInterstitialAdConfigRaw() }
-            val rewardedAdConfigDeferred = async { getRewardedAdConfigRaw() }
-            val appOpenAdConfigDeferred = async { getAppOpenAdConfigRaw() }
-            val requestConsentConfigDeferred = async { getRequestConsentConfigRaw() }
-            val tutorialConfigDeferred = async { getTutorialConfigRaw() }
-            val getOtherConfig = async {
-                getRemoteConfigUseCase.invoke(remoteConfigService)
-            }
+            val isConfigDataReady = runCatching {
+                val appConfigDeferred = async { getAppConfigRaw() }
+                val preventAdClickConfigDeferred = async { getPreventAdClickConfigRaw() }
+                val adsDisableByCountryDeferred = async { getAdsDisableByCountryRaw() }
+                val adPlacesDisableWhenDetectTestAdDeferred = async { getAdPlacesDisableWhenDetectTestAdRaw() }
+                val isTurnOnAdPlacesDisabledWhenDetectTestAdDeferred =
+                    async { isTurnOnAdPlacesDisabledWhenDetectTestAdRaw() }
+                val splashScreenConfigDeferred = async { getSplashScreenConfigRaw() }
+                val languageActivityConfigDeferred = async { getLanguageActivityConfigRaw() }
+                val onBoardingConfigDeferred = async { getOnBoardingConfigRaw() }
+                val adPlacesDeferred = async { getAdPlacesRaw() }
+                val bannerAdConfigDeferred = async { getBannerAdConfigRaw() }
+                val nativeAdConfigDeferred = async { getNativeAdConfigRaw() }
+                val interstitialAdConfigDeferred = async { getInterstitialAdConfigRaw() }
+                val rewardedInterstitialAdConfigDeferred =
+                    async { getRewardedInterstitialAdConfigRaw() }
+                val rewardedAdConfigDeferred = async { getRewardedAdConfigRaw() }
+                val appOpenAdConfigDeferred = async { getAppOpenAdConfigRaw() }
+                val requestConsentConfigDeferred = async { getRequestConsentConfigRaw() }
+                val tutorialConfigDeferred = async { getTutorialConfigRaw() }
+                val getOtherConfig = async {
+                    getRemoteConfigUseCase.invoke(remoteConfigService)
+                }
 
-            appConfigCache = appConfigDeferred.await()
-            preventAdClickConfigCache = preventAdClickConfigDeferred.await()
-            adsDisableByCountryCache = adsDisableByCountryDeferred.await()
-            adPlacesDisableWhenDetectTestAdCache = adPlacesDisableWhenDetectTestAdDeferred.await()
-            isTurnOnAdPlacesDisabledWhenDetectTestAdCache =
-                isTurnOnAdPlacesDisabledWhenDetectTestAdDeferred.await()
-            splashScreenConfigCache = splashScreenConfigDeferred.await()
-            languageActivityConfigCache = languageActivityConfigDeferred.await()
-            onBoardingConfigCache = onBoardingConfigDeferred.await()
-            startFlowConfigCache = StartFlowConfig(
-                splashScreenConfig = requireNotNull(splashScreenConfigCache),
-                languageActivityConfig = requireNotNull(languageActivityConfigCache),
-                onBoardingConfig = requireNotNull(onBoardingConfigCache),
-            )
-            adPlacesCache = adPlacesDeferred.await()
-            bannerAdConfigCache = bannerAdConfigDeferred.await()
-            nativeAdConfigCache = nativeAdConfigDeferred.await()
-            interstitialAdConfigCache = interstitialAdConfigDeferred.await()
-            rewardedInterstitialAdConfigCache = rewardedInterstitialAdConfigDeferred.await()
-            rewardedAdConfigCache = rewardedAdConfigDeferred.await()
-            appOpenAdConfigCache = appOpenAdConfigDeferred.await()
-            requestConsentConfigCache = requestConsentConfigDeferred.await()
-            tutorialConfigCache = tutorialConfigDeferred.await()
-            getOtherConfig.await()
+                appConfigCache = appConfigDeferred.await()
+                preventAdClickConfigCache = preventAdClickConfigDeferred.await()
+                adsDisableByCountryCache = adsDisableByCountryDeferred.await()
+                adPlacesDisableWhenDetectTestAdCache = adPlacesDisableWhenDetectTestAdDeferred.await()
+                isTurnOnAdPlacesDisabledWhenDetectTestAdCache =
+                    isTurnOnAdPlacesDisabledWhenDetectTestAdDeferred.await()
+                splashScreenConfigCache = splashScreenConfigDeferred.await()
+                languageActivityConfigCache = languageActivityConfigDeferred.await()
+                onBoardingConfigCache = onBoardingConfigDeferred.await()
+                startFlowConfigCache = StartFlowConfig(
+                    splashScreenConfig = requireNotNull(splashScreenConfigCache),
+                    languageActivityConfig = requireNotNull(languageActivityConfigCache),
+                    onBoardingConfig = requireNotNull(onBoardingConfigCache),
+                )
+                adPlacesCache = adPlacesDeferred.await()
+                bannerAdConfigCache = bannerAdConfigDeferred.await()
+                nativeAdConfigCache = nativeAdConfigDeferred.await()
+                interstitialAdConfigCache = interstitialAdConfigDeferred.await()
+                rewardedInterstitialAdConfigCache = rewardedInterstitialAdConfigDeferred.await()
+                rewardedAdConfigCache = rewardedAdConfigDeferred.await()
+                appOpenAdConfigCache = appOpenAdConfigDeferred.await()
+                requestConsentConfigCache = requestConsentConfigDeferred.await()
+                tutorialConfigCache = tutorialConfigDeferred.await()
+                getOtherConfig.await()
+            }.onFailure { throwable ->
+                Log.e(TAG, "fetch remote config data failed", throwable)
+            }.isSuccess
 
             if (isNotifyComplete) {
-                _fetchStateCompleteFlow.emit(FetchRemoteConfigState.Complete(isSuccess))
+                notifyFetchComplete(isSuccess && isConfigDataReady)
             }
         }
     }
