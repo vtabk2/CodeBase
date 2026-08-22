@@ -63,6 +63,7 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
     private var splashCompleteLogged = false
     private var interSplashTrackingStartedAtMs = 0L
     private var interSplashCompleteLogged = false
+    private var isWaitingForInternet = false
 
     private val appOpenPlaceName by lazy {
         if (baseViewModel.isFirstOpenApp) {
@@ -155,6 +156,7 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
         if (isNetworkConnected()) {
             startSplashPrerequisites()
         } else {
+            isWaitingForInternet = true
             onSplashStatusChanged(SplashStatus.WaitingForInternet)
             showRequireTurnOnNetworkBottomSheetFragment()
         }
@@ -230,6 +232,13 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
         }
         if (countDownTimer == null && baseViewModel.isSplashAdsFlowStarted) {
             startCountDownTimer()
+        }
+    }
+
+    override fun onNetworkChange(isNetworkConnected: Boolean) {
+        super.onNetworkChange(isNetworkConnected)
+        if (isNetworkConnected && isWaitingForInternet) {
+            startSplashPrerequisites()
         }
     }
 
@@ -375,6 +384,8 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
     }
 
     private fun startSplashPrerequisites() {
+        isWaitingForInternet = false
+        onSplashStatusChanged(SplashStatus.FetchingRemoteConfig)
         remoteConfigRepository.fetchAndActive()
         if (!baseViewModel.isRequestEuConsentComplete) {
             adsManager.requestConsentInfoUpdate(this, false)

@@ -86,7 +86,7 @@ internal class RemoteConfigRepositoryImpl @Inject constructor(
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    private val _fetchStateCompleteFlow = MutableSharedFlow<FetchRemoteConfigState>()
+    private val _fetchStateCompleteFlow = MutableSharedFlow<FetchRemoteConfigState>(replay = 1)
     override val fetchStateCompleteFlow = _fetchStateCompleteFlow.asSharedFlow()
 
     private var isFetchComplete = false
