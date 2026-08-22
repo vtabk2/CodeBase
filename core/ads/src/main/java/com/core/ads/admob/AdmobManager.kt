@@ -127,7 +127,7 @@ class AdmobManager @Inject constructor(
     private val _adFullScreenFlow = MutableSharedFlow<AdFullScreenUiResource>()
     override val adFullScreenFlow = _adFullScreenFlow.asSharedFlow()
 
-    private val _requestConsentFlow = MutableSharedFlow<ConsentFormUiResource>()
+    private val _requestConsentFlow = MutableSharedFlow<ConsentFormUiResource>(replay = 1)
     override val requestConsentFlow = _requestConsentFlow.asSharedFlow()
 
     private val adHolderBannerNativeMap = mutableMapOf<IAdPlaceName, AdHolder>()
