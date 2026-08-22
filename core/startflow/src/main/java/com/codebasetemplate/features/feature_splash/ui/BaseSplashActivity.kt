@@ -156,8 +156,7 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
         if (isNetworkConnected()) {
             startSplashPrerequisites()
         } else {
-            isWaitingForInternet = true
-            onSplashStatusChanged(SplashStatus.WaitingForInternet)
+            waitForInternet()
             showRequireTurnOnNetworkBottomSheetFragment()
         }
     }
@@ -237,8 +236,8 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
 
     override fun onNetworkChange(isNetworkConnected: Boolean) {
         super.onNetworkChange(isNetworkConnected)
-        if (isNetworkConnected && isWaitingForInternet) {
-            startSplashPrerequisites()
+        if (!isNetworkConnected && !baseViewModel.isSplashAdsFlowStarted) {
+            waitForInternet()
         }
     }
 
@@ -251,10 +250,18 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
             Timber.e("fetchState: $fetchState")
             when (fetchState) {
                 FetchRemoteConfigState.Loading -> {
+                    if (!isNetworkConnected()) {
+                        waitForInternet()
+                        return@collectFlowOn
+                    }
                     onSplashStatusChanged(SplashStatus.FetchingRemoteConfig)
                 }
 
                 is FetchRemoteConfigState.Complete -> {
+                    if (!isNetworkConnected()) {
+                        waitForInternet()
+                        return@collectFlowOn
+                    }
                     handleRemoteConfigReady()
                 }
             }
@@ -263,15 +270,27 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
         collectFlowOn(adsManager.requestConsentFlow) { uiResource ->
             when (uiResource) {
                 ConsentFormUiResource.Loading -> {
+                    if (!isNetworkConnected()) {
+                        waitForInternet()
+                        return@collectFlowOn
+                    }
                     onSplashStatusChanged(SplashStatus.WaitingForConsent)
                 }
 
                 ConsentFormUiResource.Showing -> {
+                    if (!isNetworkConnected()) {
+                        waitForInternet()
+                        return@collectFlowOn
+                    }
                     onSplashStatusChanged(SplashStatus.WaitingForConsent)
                 }
 
                 ConsentFormUiResource.Complete -> {
                     Timber.e("ConsentFormUiResource.Complete")
+                    if (!isNetworkConnected()) {
+                        waitForInternet()
+                        return@collectFlowOn
+                    }
                     baseViewModel.isRequestEuConsentComplete = true
                     tryStartSplashAdsFlow()
                 }
@@ -383,7 +402,16 @@ abstract class BaseSplashActivity<VB : ViewBinding> : StartFlowActivity<VB>() {
         tryStartSplashAdsFlow()
     }
 
+    private fun waitForInternet() {
+        isWaitingForInternet = true
+        onSplashStatusChanged(SplashStatus.WaitingForInternet)
+    }
+
     private fun startSplashPrerequisites() {
+        if (!isNetworkConnected()) {
+            waitForInternet()
+            return
+        }
         isWaitingForInternet = false
         onSplashStatusChanged(SplashStatus.FetchingRemoteConfig)
         remoteConfigRepository.fetchAndActive()

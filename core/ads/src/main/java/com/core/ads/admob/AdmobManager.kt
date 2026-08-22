@@ -387,6 +387,7 @@ class AdmobManager @Inject constructor(
         UserMessagingPlatform.loadConsentForm(
             /* context = */ context,
             /* successListener = */ { consentForm ->
+                if (isConsentCompleted) return@loadConsentForm
                 isConsentRequesting = false
                 if (isForceShow) {
                     if (consentInformation.consentStatus == ConsentInformation.ConsentStatus.REQUIRED

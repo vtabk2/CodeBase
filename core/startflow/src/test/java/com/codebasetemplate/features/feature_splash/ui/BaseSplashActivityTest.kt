@@ -7,19 +7,31 @@ import org.junit.Test
 class BaseSplashActivityTest {
 
     @Test
-    fun `network reconnect resumes splash while waiting for internet`() {
+    fun `offline splash waits for internet and skips fetch callbacks`() {
         val source = readSplashSource()
 
-        assertTrue(source.contains("isWaitingForInternet = true"))
         assertTrue(
             Regex(
-                """override fun onNetworkChange\(isNetworkConnected: Boolean\).*if \(isNetworkConnected && isWaitingForInternet\).*startSplashPrerequisites\(\)""",
+                """private fun startSplashPrerequisites\(\) \{\s*if \(!isNetworkConnected\(\)\) \{\s*waitForInternet\(\)\s*return\s*\}.*remoteConfigRepository\.fetchAndActive\(\)""",
                 RegexOption.DOT_MATCHES_ALL
             ).containsMatchIn(source)
         )
         assertTrue(
             Regex(
-                """private fun startSplashPrerequisites\(\) \{\s*isWaitingForInternet = false\s*onSplashStatusChanged\(SplashStatus\.FetchingRemoteConfig\)"""
+                """FetchRemoteConfigState\.Complete -> \{\s*if \(!isNetworkConnected\(\)\) \{\s*waitForInternet\(\)\s*return@collectFlowOn\s*\}\s*handleRemoteConfigReady\(\)""",
+                RegexOption.DOT_MATCHES_ALL
+            ).containsMatchIn(source)
+        )
+        assertTrue(
+            Regex(
+                """ConsentFormUiResource\.Complete -> \{.*if \(!isNetworkConnected\(\)\) \{\s*waitForInternet\(\)\s*return@collectFlowOn\s*\}\s*baseViewModel\.isRequestEuConsentComplete = true""",
+                RegexOption.DOT_MATCHES_ALL
+            ).containsMatchIn(source)
+        )
+        assertTrue(
+            Regex(
+                """override fun onNetworkChange\(isNetworkConnected: Boolean\).*if \(!isNetworkConnected && !baseViewModel\.isSplashAdsFlowStarted\) \{\s*waitForInternet\(\)\s*\}""",
+                RegexOption.DOT_MATCHES_ALL
             ).containsMatchIn(source)
         )
     }
